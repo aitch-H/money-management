@@ -145,7 +145,7 @@ else:
             monthly = user_df.groupby('Month')['Display_Amount'].sum().reset_index()
             monthly.columns = ['Month', f'Total ({curr_s})']
         
-        st.dataframe(monthly.set_index('Month').T, use_container_width=True)
+            st.dataframe(monthly.set_index('Month').T, use_container_width=True)
     with row3_col2:
         st.subheader(t("history"))
         if not user_df.empty:
