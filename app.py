@@ -4,7 +4,6 @@ import hashlib
 import os
 import datetime
 import plotly.express as px
-import requests
 import time
 
 # --- 1. Security & Data Setup ---
@@ -14,35 +13,35 @@ def make_hashes(password):
 def check_hashes(password, hashed_text):
     return make_hashes(password) == hashed_text
 
-USER_DB = "users.csv"
-DATA_FILE = "sumal_records.csv"
+USER_DB, DATA_FILE = "users.csv", "sumal_records.csv"
 
-# ဖိုင်တွေမရှိရင် အသစ်ဆောက်မယ် (User column ပါရမယ်)
+# Settings သိမ်းဖို့ ကော်လံ (၂) ခု ထပ်တိုးထားပါတယ်
 if not os.path.exists(USER_DB):
-    pd.DataFrame(columns=["username", "password"]).to_csv(USER_DB, index=False)
+    pd.DataFrame(columns=["username", "password", "language", "currency"]).to_csv(USER_DB, index=False)
 if not os.path.exists(DATA_FILE):
     pd.DataFrame(columns=["Date", "User", "Type", "Category", "Amount_MMK", "Note", "Input_Currency", "Input_Amount"]).to_csv(DATA_FILE, index=False)
+
+# Preference တွေကို ဖိုင်ထဲမှာ သွားသိမ်းမယ့် function
+def update_user_pref(u, lang, curr):
+    users = pd.read_csv(USER_DB)
+    users.loc[users['username'] == u, ['language', 'currency']] = [lang, curr]
+    users.to_csv(USER_DB, index=False)
 
 # --- 2. Page Config ---
 st.set_page_config(page_title="SU-MAL", page_icon="💰", layout="wide")
 
 if 'logged_in' not in st.session_state: st.session_state.logged_in = False
-if 'language' not in st.session_state: st.session_state.language = 'my'
-if 'base_currency' not in st.session_state: st.session_state.base_currency = 'MMK'
 if 'exchange_rates' not in st.session_state:
     st.session_state.exchange_rates = {'THB': 145.0, 'USD': 3500.0, 'MMK': 1.0}
 
-# --- 3. Translations & Categories ---
+# --- 3. Translations ---
 TRANSLATIONS = {
     "en": {"app_title": "SU-MAL _ BUDGET TRACKER", "income": "Income", "expense": "Expense", "transfer": "Transfer", "saved": "Saved", "type": "Type", "cat": "Category", "amt": "Amount", "save": "Add Record", "history": "History"},
     "my": {"app_title": "SU-MAL _ ငွေစာရင်း စီမံခန့်ခွဲမှု", "income": "ဝင်ငွေ", "expense": "အသုံးစရိတ်", "transfer": "ပို့ငွေ", "saved": "လက်ကျန်", "type": "အမျိုးအစား", "cat": "အုပ်စု", "amt": "ပမာဏ", "save": "စာရင်းသွင်းမည်", "history": "မှတ်တမ်း"},
     "th": {"app_title": "SU-MAL _ แอปจัดการเงิน", "income": "รายได้", "expense": "ค่าใช้จ่าย", "transfer": "โอนเงิน", "saved": "เงินออม", "type": "ประเภท", "cat": "หมวดหมู่", "amt": "จำนวนเงิน", "save": "บันทึก", "history": "ประวัติ"}
 }
-CATS = {
-    "Income": ["Salary", "Bonus", "Gift", "Other"],
-    "Expense": ["Food", "Transport", "Shopping", "Bills", "Health", "Other"],
-    "Transfer": ["Family", "Bank", "Investment"]
-}
+CATS = {"Income": ["Salary", "Bonus", "Gift", "Other"], "Expense": ["Food", "Transport", "Shopping", "Bills", "Health", "Other"], "Transfer": ["Family", "Bank", "Investment"]}
+
 def t(key): return TRANSLATIONS[st.session_state.language].get(key, key)
 
 # --- 4. Login / Sign Up Page ---
@@ -60,6 +59,9 @@ if not st.session_state.logged_in:
                 user_row = users[users['username'] == u]
                 if not user_row.empty and check_hashes(p, user_row.iloc[0]['password']):
                     st.session_state.logged_in, st.session_state.user = True, u
+                    # ဖိုင်ထဲက Settings တွေကို ဆွဲထုတ်မယ်
+                    st.session_state.language = user_row.iloc[0]['language'] if pd.notna(user_row.iloc[0]['language']) else 'my'
+                    st.session_state.base_currency = user_row.iloc[0]['currency'] if pd.notna(user_row.iloc[0]['currency']) else 'MMK'
                     st.rerun()
                 else: st.error("Username သို့မဟုတ် Password မှားနေပါတယ်")
         
@@ -69,31 +71,36 @@ if not st.session_state.logged_in:
             if st.button("Create Account", use_container_width=True):
                 users = pd.read_csv(USER_DB)
                 if new_u and new_u not in users['username'].values:
-                    pd.DataFrame([[new_u, make_hashes(new_p)]]).to_csv(USER_DB, mode='a', header=False, index=False)
+                    # အကောင့်သစ်ဖွင့်ရင် Default settings တွေပါ တစ်ခါတည်းထည့်မယ်
+                    pd.DataFrame([[new_u, make_hashes(new_p), 'my', 'MMK']]).to_csv(USER_DB, mode='a', header=False, index=False)
                     st.success("အကောင့်ဖွင့်ပြီးပါပြီ။ Login ပြန်ဝင်ပါ")
-                else: st.warning("ဒီနာမည် ရှိပြီးသားပါ သို့မဟုတ် နာမည်အလွတ်ဖြစ်နေပါတယ်")
+                else: st.warning("ဒီနာမည် ရှိပြီးသားပါ")
 
-# --- 5. Main Dashboard (After Login) ---
+# --- 5. Main Dashboard ---
 else:
-    # Header Section
     col_head, col_menu = st.columns([4, 1])
     col_head.title(t("app_title"))
     with col_menu.popover("☰ Menu"):
         st.write(f"👤 User: **{st.session_state.user}**")
-        st.session_state.language = st.selectbox("🌐 Language", ["my", "en", "th"], index=["my", "en", "th"].index(st.session_state.language))
-        st.session_state.base_currency = st.selectbox("💱 Currency", ["MMK", "THB", "USD"], index=["MMK", "THB", "USD"].index(st.session_state.base_currency))
+        n_l = st.selectbox("🌐 Language", ["my", "en", "th"], index=["my", "en", "th"].index(st.session_state.language))
+        n_c = st.selectbox("💱 Currency", ["MMK", "THB", "USD"], index=["MMK", "THB", "USD"].index(st.session_state.base_currency))
+        
+        # Setting ပြောင်းလိုက်တာနဲ့ ဖိုင်ထဲမှာပါ သွားသိမ်းမယ်
+        if n_l != st.session_state.language or n_c != st.session_state.base_currency:
+            st.session_state.language, st.session_state.base_currency = n_l, n_c
+            update_user_pref(st.session_state.user, n_l, n_c)
+            st.rerun()
+            
         if st.button("Logout", use_container_width=True):
             st.session_state.logged_in = False
             st.rerun()
 
-    # Data Loading & Filtering
     df = pd.read_csv(DATA_FILE, parse_dates=["Date"])
-    # ကိုယ်ပိုင် Data ပဲ မြင်ရအောင် Filter လုပ်မယ်
     user_df = df[df["User"] == st.session_state.user]
     rate = st.session_state.exchange_rates.get(st.session_state.base_currency, 1.0)
     curr_s = {"USD": "$", "THB": "฿", "MMK": "K"}[st.session_state.base_currency]
 
-    # Row 1: Donut & Form
+    # Donut & Form
     row1_col1, row1_col2 = st.columns([1.2, 2])
     with row1_col1:
         st.subheader("Visual Analysis")
@@ -137,14 +144,10 @@ else:
     with row3_col1:
         st.subheader("Summary")
         if not user_df.empty:
-        # လက်ရှိရွေးထားတဲ့ Currency အတိုင်း ပြောင်းလဲတွက်ချက်မယ်
             user_df['Display_Amount'] = user_df['Amount_MMK'] / rate
             user_df['Month'] = user_df['Date'].dt.strftime('%b')
-        
-        # Summary ဇယားမှာ MMK အစား Display_Amount ကို သုံးမယ်
             monthly = user_df.groupby('Month')['Display_Amount'].sum().reset_index()
             monthly.columns = ['Month', f'Total ({curr_s})']
-        
             st.dataframe(monthly.set_index('Month').T, use_container_width=True)
     with row3_col2:
         st.subheader(t("history"))
